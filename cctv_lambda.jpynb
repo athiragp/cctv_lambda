@@ -1,0 +1,56 @@
+import boto3
+from datetime import datetime, timedelta
+
+def lambda_handler(event, context):
+    # Initialize S3 and SNS clients
+    s3_client = boto3.client('s3')
+    sns_client = boto3.client('sns')
+
+    # Replace with your S3 bucket name and SNS topic ARN
+    bucket_name = 'pavithraganga-cctv'
+    topic_arn = 'arn:aws:sns:us-east-2:907782369739:Pavithraganga_CCTV_S3_Sync_Error'
+
+    # List of camera names
+    cameras = ['camera1', 'camera2', 'camera3', 'camera4', 'camera5', 'camera6']
+
+    # Calculate the expected hour (e.g., 9am two hours later)
+    current_time = datetime.utcnow()
+    expected_hour = current_time.replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
+
+    missing_hours = []
+
+    for camera in cameras:
+        # Construct the expected S3 key for the hour and camera
+        expected_key = f"{expected_hour.strftime('%Y-%m-%d')}/{camera}/{expected_hour.strftime('%H')}/"
+
+        try:
+            # List objects in the expected hour directory
+            response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=expected_key)
+            actual_files = [obj['Key'] for obj in response.get('Contents', [])]
+        except Exception as e:
+            print(f"Error listing objects in S3: {e}")
+            raise
+
+        if len(actual_files) != 60:
+            # Record missing hour if there are not 60 files
+            missing_hours.append((camera, len(actual_files)))
+
+    if missing_hours:
+        # Construct message for missing files
+        message = "The following hours have incomplete files:\n"
+        for hour, count in missing_hours:
+            message += f"{hour}: {count} files found\n"
+
+        # Send SNS notification for missing files
+        sns_client.publish(
+            TopicArn=topic_arn,
+            Subject="CCTV Files Incomplete",
+            Message=message
+        )
+    else:
+        print("All minute files found for all cameras.")
+
+    return {
+        'statusCode': 200,
+        'body': 'Check complete'
+    }
